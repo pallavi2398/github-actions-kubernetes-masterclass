@@ -30,10 +30,14 @@ func GetDashboard(c *gin.Context) {
 }
 
 func HealthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+}
+
+func ReadinessCheck(c *gin.Context) {
 	err := database.DB.Ping()
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unhealthy", "error": err.Error()})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	c.JSON(http.StatusOK, gin.H{"status": "ready"})
 }

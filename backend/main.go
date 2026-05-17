@@ -25,8 +25,9 @@ func main() {
 		api.GET("/dashboard", handlers.GetDashboard)
 	}
 
-	// Health check
+	// Health and readiness checks
 	router.GET("/health", handlers.HealthCheck)
+	router.GET("/ready", handlers.ReadinessCheck)
 
 	port := os.Getenv("PORT")
 	if port == "" {

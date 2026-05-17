@@ -1,0 +1,42 @@
+---
+- name: Configure SkillPulse deployment server
+  hosts: app_servers
+  become: true
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install basic packages
+      ansible.builtin.apt:
+        name:
+          - git
+          - curl
+          - ca-certificates
+        state: present
+
+    - name: Install Docker using official script
+      ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Start and enable Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add ubuntu user to docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Check Docker version
+      ansible.builtin.command: docker --version
+      changed_when: false
+
+    - name: Check Docker Compose version
+      ansible.builtin.command: docker compose version
+      changed_when: false

@@ -1,0 +1,35 @@
+name: Image Scan
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  image-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t skillpulse-backend:scan ./backend
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: skillpulse-backend:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Build frontend image
+        run: docker build -t skillpulse-frontend:scan ./frontend
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: skillpulse-frontend:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
