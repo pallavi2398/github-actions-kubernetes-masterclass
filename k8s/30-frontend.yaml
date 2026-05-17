@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: pallavi2398/skillpulse-frontend:417b37cfce9f057abd766e4bc8d7651d500e76bb
+          image: pallavi2398/skillpulse-frontend:42abba73868a02e33d849d0b7a519f6f781bc78c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
