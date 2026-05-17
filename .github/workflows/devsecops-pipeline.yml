@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - 'k8s/**'
       - 'docs/**'
+      - 'scripts/**'
       - '**/*.md'
   pull_request:
     branches: [main]
