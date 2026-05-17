@@ -44,6 +44,10 @@ kubectl apply -f k8s/00-namespace.yaml \
   -f k8s/20-backend.yaml \
   -f k8s/30-frontend.yaml
 
+echo "Using locally built images for this Kubernetes run..."
+kubectl set image deployment/backend backend="${BACKEND_IMAGE}" -n "${NAMESPACE}"
+kubectl set image deployment/frontend frontend="${FRONTEND_IMAGE}" -n "${NAMESPACE}"
+
 echo "Restarting application deployments..."
 kubectl rollout restart deployment/backend deployment/frontend -n "${NAMESPACE}"
 

@@ -21,7 +21,7 @@ The goal was to reduce manual work, improve deployment confidence, and make the 
 
 | Area | Improvement | Why it matters |
 | --- | --- | --- |
-| CI/CD optimization | Added Docker build cache, backend Go checks, and workflow concurrency in `.github/workflows/ci.yml` | Reuses unchanged Docker layers, catches backend issues earlier, and cancels outdated runs |
+| CI/CD optimization | Added Docker build cache, reusable CI/CD workflows, and workflow concurrency | Reuses unchanged Docker layers, keeps the pipeline clean, and cancels outdated runs |
 | DevSecOps | Added reusable workflows for Docker linting, secrets scanning, code quality, and image scanning | Blocks image build and deployment if security checks fail |
 | Docker optimization | Optimized backend Dockerfile with dependency caching and a distroless runtime image | Reduced backend image size and improved runtime security |
 | Kubernetes reliability | Added 2 replicas, rolling update strategy, backend security context, and separate readiness probe | Improves availability and safer rollouts |
@@ -29,6 +29,17 @@ The goal was to reduce manual work, improve deployment confidence, and make the 
 | Local automation | Added scripts for local deploy, health checks, log analysis, backup, and restore | Reduces repeated manual commands during local testing |
 | IaC | Added Terraform for EC2 provisioning | Makes the deployment server repeatable |
 | Configuration automation | Added Ansible to install Docker, Docker Compose, and Git on EC2 | Prepares the EC2 server automatically for deployment |
+
+### Two ways to run and validate
+
+This project supports two useful paths. They are not competing approaches; they prove different DevOps skills.
+
+| Path | How to run it | What it proves | Main benefit |
+| --- | --- | --- | --- |
+| GitHub Actions CI/CD to EC2 | Push to `main` after setting GitHub secrets and `DEPLOY_ENABLED=true` | Security gates, Docker image build/push, and automated EC2 deployment | Shows end-to-end automation from code commit to live server |
+| Local Kubernetes with kind | Run `./scripts/deploy-local.sh` and `./scripts/health-check.sh` | Kubernetes manifests, rollouts, probes, services, and local cluster behavior | Lets you test the app in a production-like Kubernetes setup before cloud deployment |
+
+Use the CI/CD path to show automated delivery. Use the Kubernetes path to show that the same application can run correctly as Kubernetes workloads.
 
 ### DevSecOps workflows
 
@@ -39,7 +50,9 @@ The DevSecOps pipeline is split into small reusable workflows:
 .github/workflows/docker-lint.yml         -> Hadolint for Dockerfiles
 .github/workflows/secrets-scan.yml        -> Gitleaks secret scanning
 .github/workflows/image-scan.yml          -> Trivy image vulnerability scanning
-.github/workflows/devsecops-pipeline.yml  -> Runs all checks together
+.github/workflows/ci.yml                  -> Build and push Docker images
+.github/workflows/cd.yml                  -> Deploy to EC2 with Docker Compose
+.github/workflows/devsecops-pipeline.yml  -> Orchestrates security -> CI -> CD
 ```
 
 On every push to `main`, the DevSecOps pipeline runs the full flow in one graph: code quality, secret scanning, Dockerfile linting, Trivy image scanning, CI image build/push, and CD deployment. CI starts only after `image-scan` succeeds. CD starts only after CI succeeds.
@@ -130,17 +143,17 @@ This `.env` file is not committed because it contains runtime configuration.
 
 ### Verified results
 
-Local verification completed successfully:
+Verification completed successfully:
 
 ```text
 Docker build: backend and frontend images built successfully
-Kubernetes: backend, frontend, and MySQL pods running
+Local Kubernetes: fresh kind cluster created and app visible at http://localhost:8888
 Health checks: /health returned healthy and /ready returned ready
 Backup/restore: MySQL backup and restore completed successfully
 Go checks: go test ./... and go vet ./... passed
 Terraform: terraform validate passed
 Ansible: EC2 setup completed with failed=0
-GitHub Actions: CI/CD pipeline completed green and app deployed to EC2
+GitHub Actions: DevSecOps -> CI -> CD pipeline completed green and app deployed to EC2
 ```
 
 Backend image size improved from:
@@ -149,83 +162,20 @@ Backend image size improved from:
 34.6MB -> 18.3MB
 ```
 
-### Proof screenshots to capture
+### How deployment time was reduced
 
-Take these screenshots for the hackathon submission:
+The project reduces delivery time by removing repeated manual work and avoiding unnecessary rebuilds:
 
-1. GitHub Actions page showing green DevSecOps pipeline with `image-scan -> CI -> CD`.
-2. CI job logs showing backend and frontend images built and pushed.
-3. GitHub Actions CD job showing successful EC2 deployment.
-4. Browser showing the app running on EC2: `http://<EC2_PUBLIC_IP>`.
-5. Docker image size output showing backend image size around `18.3MB`.
-6. Local Kubernetes pods running:
+| Improvement | How it reduces time |
+| --- | --- |
+| Docker layer caching in GitHub Actions | Reuses unchanged image layers, so repeat builds spend less time rebuilding and pushing the same dependencies |
+| Smaller backend image | Reduced backend image size from `34.6MB` to `18.3MB`, which makes image push/pull faster |
+| Reusable pipeline stages | Security, CI, and CD are split into reusable workflows but shown in one graph, making the flow easier to maintain without duplicating logic |
+| Workflow concurrency | Cancels older in-progress runs when a newer commit is pushed to `main`, so runner time is not wasted on outdated commits |
+| Local Kubernetes script | Replaces many manual `docker`, `kind`, and `kubectl` commands with one repeatable command for local validation |
+| Terraform and Ansible | Automates EC2 creation and server setup, reducing manual infrastructure preparation time |
 
-```bash
-kubectl get pods -n skillpulse
-```
-
-7. Health check script output:
-
-```bash
-./scripts/health-check.sh
-```
-
-8. Backup and restore script output:
-
-```bash
-./scripts/backup-mysql.sh
-./scripts/restore-mysql.sh backups/<backup-file>.sql
-```
-
-9. Terraform output showing EC2 public IP:
-
-```bash
-terraform output
-```
-
-10. Ansible recap showing `failed=0`:
-
-```bash
-ansible-playbook -i inventory.ini setup-server.yml
-```
-
-11. EC2 server containers running:
-
-```bash
-ssh -i infra/terraform/terra-automate-key ubuntu@<EC2_PUBLIC_IP>
-cd ~/github-actions-kubernetes-masterclass
-docker compose ps
-```
-
-### How to compare time reduction
-
-Use GitHub Actions run duration to compare before and after optimization:
-
-1. Open GitHub repository.
-2. Go to `Actions`.
-3. Open an older CI run before the optimization.
-4. Note the total run time and job time.
-5. Open the latest CI run after the optimization.
-6. Compare the total run time and the Docker build step duration.
-
-The important improvements to look for:
-
-```text
-Docker layer cache is reused in later builds
-unchanged Docker layers show as cached
-old workflow runs are cancelled when newer commits are pushed
-backend code is tested before images are built
-backend image size is smaller, reducing push/pull work
-```
-
-Useful commands for local proof:
-
-```bash
-docker images | grep skillpulse
-time ./scripts/deploy-local.sh
-```
-
-The first optimized run may still take time because dependencies and cache layers are created. The next runs should be faster because Docker and GitHub Actions can reuse cache.
+The first optimized run can still take time because caches need to be created. Later runs are faster because Docker and GitHub Actions can reuse unchanged layers.
 
 ---
 
@@ -390,7 +340,8 @@ GET    /api/skills/:id          one skill + its logs
 DELETE /api/skills/:id          delete skill (cascades logs)
 POST   /api/skills/:id/log      log a study session
 GET    /api/dashboard           summary counters
-GET    /health                  DB ping for healthchecks
+GET    /health                  simple liveness check
+GET    /ready                   readiness check with DB ping
 ```
 
 ---
@@ -418,36 +369,43 @@ Same app, same images, same external port — but now every primitive a student 
 
 **Prerequisites:** Docker Desktop running, plus `brew install kind kubectl`.
 
+Fresh local Kubernetes test:
+
 ```bash
-make up                          # creates the kind cluster + applies manifests
-# visit http://localhost:8888
-make down                        # deletes the cluster (and the MySQL data with it)
+kind delete cluster --name skillpulse   # optional: deletes the old local cluster
+./scripts/deploy-local.sh               # creates cluster, builds images, applies manifests
+./scripts/health-check.sh               # verifies pods, services, /health, and /ready
 ```
 
-What `make up` actually runs, in order:
+Open the app at http://localhost:8888.
+
+What `deploy-local.sh` does, in order:
 
 ```bash
-docker build -t trainwithshubham/skillpulse-backend:latest  ./backend
-docker build -t trainwithshubham/skillpulse-frontend:latest ./frontend
-kind create cluster --config k8s/kind-config.yaml --name skillpulse
-kind load docker-image trainwithshubham/skillpulse-backend:latest  --name skillpulse
-kind load docker-image trainwithshubham/skillpulse-frontend:latest --name skillpulse
+docker build -t pallavi2398/skillpulse-backend:k8s ./backend
+docker build -t pallavi2398/skillpulse-frontend:k8s ./frontend
+kind create cluster --config k8s/kind-config.yaml --name skillpulse   # only if missing
+kind load docker-image pallavi2398/skillpulse-backend:k8s --name skillpulse
+kind load docker-image pallavi2398/skillpulse-frontend:k8s --name skillpulse
 kubectl apply -f k8s/00-namespace.yaml \
               -f k8s/10-mysql.yaml \
               -f k8s/20-backend.yaml \
               -f k8s/30-frontend.yaml
-kubectl rollout status statefulset/mysql   -n skillpulse --timeout=180s
-kubectl rollout status deployment/backend  -n skillpulse --timeout=120s
-kubectl rollout status deployment/frontend -n skillpulse --timeout=60s
+kubectl set image deployment/backend backend=pallavi2398/skillpulse-backend:k8s -n skillpulse
+kubectl set image deployment/frontend frontend=pallavi2398/skillpulse-frontend:k8s -n skillpulse
+kubectl rollout status statefulset/mysql -n skillpulse
+kubectl rollout status deployment/backend -n skillpulse
+kubectl rollout status deployment/frontend -n skillpulse
 ```
 
 Notes on this flow:
 
 - **`docker build` runs on your laptop**, producing images for your host's architecture (Apple Silicon → arm64; Intel/Linux → amd64). The cluster never has to deal with multi-arch.
 - **`kind load docker-image`** copies each image into the kind node's containerd. `imagePullPolicy: IfNotPresent` on the Deployments means k8s reuses the loaded image and never tries to pull from Docker Hub.
+- **`kubectl set image`** makes local testing reliable even when the committed manifests are pinned to CI-generated SHA image tags.
 - **`kind-config.yaml`** lives alongside the manifests for proximity, but it's a `kind` config — not a Kubernetes resource — so it's fed to `kind create cluster`, not `kubectl apply`.
 
-Inner-loop after editing code: `make restart` rebuilds the images, reloads them into the cluster, and rolls the Deployments.
+The Makefile is still valid as a shortcut layer. The script is useful for a fresh local Kubernetes test because it also handles the local `:k8s` image tags.
 
 ### How traffic flows
 
