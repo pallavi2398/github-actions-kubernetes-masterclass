@@ -42,7 +42,7 @@ The DevSecOps pipeline is split into small reusable workflows:
 .github/workflows/devsecops-pipeline.yml  -> Runs all checks together
 ```
 
-On every push to `main`, the DevSecOps pipeline runs first. It runs code quality, secret scanning, Dockerfile linting, and Trivy image scanning. The CI pipeline starts only after the DevSecOps pipeline finishes successfully. The CD workflow deploys only after the CI workflow succeeds.
+On every push to `main`, the DevSecOps pipeline runs the full flow in one graph: code quality, secret scanning, Dockerfile linting, Trivy image scanning, CI image build/push, and CD deployment. CI starts only after `image-scan` succeeds. CD starts only after CI succeeds.
 
 Gitleaks handles secret detection, so Trivy is configured to focus on image vulnerability scanning.
 
@@ -153,8 +153,8 @@ Backend image size improved from:
 
 Take these screenshots for the hackathon submission:
 
-1. GitHub Actions page showing green DevSecOps pipeline.
-2. GitHub Actions page showing CI starting after the DevSecOps pipeline succeeds.
+1. GitHub Actions page showing green DevSecOps pipeline with `image-scan -> CI -> CD`.
+2. CI job logs showing backend and frontend images built and pushed.
 3. GitHub Actions CD job showing successful EC2 deployment.
 4. Browser showing the app running on EC2: `http://<EC2_PUBLIC_IP>`.
 5. Docker image size output showing backend image size around `18.3MB`.
@@ -287,13 +287,22 @@ A real pipeline, end to end, in roughly 50 lines of YAML.
                                              │ on: push (main)
                                              ▼
                                     ┌──────────────────┐
+                                    │ DevSecOps checks │
+                                    │  - code quality  │
+                                    │  - secrets scan  │
+                                    │  - docker lint   │
+                                    │  - image scan    │
+                                    └────────┬─────────┘
+                                             │ needs: image-scan
+                                             ▼
+                                    ┌──────────────────┐
                                     │  CI Workflow     │
                                     │  - build images  │
                                     │  - tag :sha      │
                                     │  - tag :latest   │
                                     │  - push to Hub   │
                                     └────────┬─────────┘
-                                             │ workflow_run: success
+                                             │ needs: ci
                                              ▼
                                     ┌──────────────────┐
                                     │  CD Workflow     │
@@ -312,7 +321,7 @@ A real pipeline, end to end, in roughly 50 lines of YAML.
 
 ### CI — `.github/workflows/ci.yml`
 
-Triggered on every push to `main`. It does four things:
+Called by the DevSecOps pipeline after the security checks pass. It does four things:
 
 1. **Checks out the code.** A fresh clone in a clean Ubuntu runner — no laptop state to leak.
 2. **Builds two Docker images.** A Go backend and an Nginx-served frontend. Both are multi-stage so the final images are small.
@@ -323,7 +332,7 @@ The non-obvious lesson: **CI doesn't just test your code. It produces an artifac
 
 ### CD — `.github/workflows/cd.yml`
 
-Triggered automatically when CI completes successfully (`workflow_run` + a `conclusion == 'success'` gate). Skipped if CI failed — you cannot deploy a broken build.
+Called by the DevSecOps pipeline after CI completes successfully. Skipped if CI failed — you cannot deploy a broken build.
 
 It SSHes into an EC2 instance and runs:
 
@@ -519,10 +528,10 @@ The new CD path doesn't `kubectl apply` from GitHub Actions — your kind cluste
 ```
 git push to main
     ↓
-CI: build images, push trainwithshubham/skillpulse-{backend,frontend}:{latest,<sha>}
+DevSecOps: security checks → CI image build/push → CD to EC2
     ↓
-cd-k8s.yml: sed image: lines in k8s/20-backend.yaml + k8s/30-frontend.yaml
-            commit "deploy: pin backend+frontend to <short-sha>" to main as github-actions[bot]
+cd-k8s.yml: after DevSecOps succeeds, pin k8s image tags to the successful commit
+            commit "deploy: pin backend+frontend to <short-sha>" as github-actions[bot]
     ↓
 (you, locally):
     git pull && make apply
@@ -540,10 +549,11 @@ kind nodes pull the new :<sha> from Docker Hub → rolling update
    | `DOCKERHUB_USERNAME` | your Docker Hub account name |
    | `DOCKERHUB_TOKEN` | a Docker Hub Personal Access Token with Read & Write scope |
 
-3. **Set the repo variable** `DEPLOY_ENABLED = "true"` (`Settings → Variables → Actions`). Until this is `true`, CI builds without pushing and both CD workflows skip cleanly — the "dry run" state.
-4. **Push any code change** (not a `.md`, not under `k8s/` or `docs/` — those are deliberately ignored by CI). Watch the Actions tab:
-   - **CI** builds + pushes both images to Docker Hub.
-   - **CD (kind cluster — manifest bump)** commits a `deploy: pin backend+frontend to <sha>` change to main.
+3. **Set the repo variable** `DEPLOY_ENABLED = "true"` (`Settings → Variables → Actions`). Until this is `true`, CI builds without pushing and CD skips cleanly — the "dry run" state.
+4. **Push any code change** (not a `.md`, not under `k8s/` or `docs/` — those are deliberately ignored). Watch the Actions tab:
+   - **DevSecOps** runs code quality, secrets scan, Docker lint, and image scan.
+   - **CI** builds + pushes both images to Docker Hub after `image-scan` succeeds.
+   - **CD** deploys to EC2 after CI succeeds.
 5. **Pull and deploy**, on the laptop with the kind cluster:
    ```bash
    git pull
@@ -554,13 +564,13 @@ kind nodes pull the new :<sha> from Docker Hub → rolling update
 
 ### What about the EC2 path?
 
-The previous chapter's `cd.yml` is still in the repo — it SSHes into an EC2 and runs `docker compose up`. It's gated on the same `DEPLOY_ENABLED` variable plus three EC2 secrets (`EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`). Skip those secrets and `cd.yml` will fail loudly when `DEPLOY_ENABLED=true`; that's expected — it's the previous chapter's deploy target, kept around as the masterclass artifact.
+The EC2 path is now part of the main DevSecOps graph. The `cd.yml` workflow SSHes into EC2 and runs `docker compose up`. It is gated on the same `DEPLOY_ENABLED` variable plus three EC2 secrets (`EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`).
 
 ### Break it on purpose to learn
 
-- **Push a commit that fails to build** → both CD workflows are *skipped*, not failed (the `if: success()` gate).
+- **Push a commit that fails security or build checks** → CI/CD jobs are skipped or stopped before deployment.
 - **Rotate the Docker Hub token** → next CI fails at the login step. You'll learn what an expired credential looks like in logs.
-- **Edit `k8s/20-backend.yaml`'s image tag by hand and push** → CI is *skipped* (paths-ignore), `cd-k8s.yml` does fire but the manifest is already pinned, so it no-ops and exits 0. That's the loop-protection working.
+- **Edit `k8s/20-backend.yaml`'s image tag by hand and push** → the main DevSecOps flow is skipped because `k8s/` changes are ignored. That's the loop-protection working.
 
 ---
 
@@ -585,8 +595,9 @@ docker-compose.yml      three services: db, backend, frontend
 .env.example            copy to .env
 
 .github/workflows/
-  ci.yml                build + push images on every main push
-  cd.yml                SSH + redeploy on CI success
+  devsecops-pipeline.yml  orchestrates security -> CI -> CD
+  ci.yml                  reusable build + push workflow
+  cd.yml                  reusable SSH deploy workflow
 ```
 
 ---

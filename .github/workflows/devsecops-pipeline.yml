@@ -25,3 +25,17 @@ jobs:
   image-scan:
     needs: [code-quality, secrets-scan, docker-scan]
     uses: ./.github/workflows/image-scan.yml
+
+  ci:
+    name: CI - Build and Push Images
+    needs: [image-scan]
+    if: ${{ github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  cd:
+    name: CD - Deploy to EC2
+    needs: [ci]
+    if: ${{ github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true' }}
+    uses: ./.github/workflows/cd.yml
+    secrets: inherit
