@@ -37,7 +37,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: pallavi2398/skillpulse-backend:k8s
+          image: pallavi2398/skillpulse-backend:417b37cfce9f057abd766e4bc8d7651d500e76bb
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
