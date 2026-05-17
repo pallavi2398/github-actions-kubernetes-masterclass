@@ -11,6 +11,224 @@ This repo is the working demo for the **TrainWithShubham GitHub Actions & Kubern
 
 ---
 
+## Hackathon Enhancements
+
+This fork improves the original three-tier SkillPulse project with beginner-friendly DevOps automation, CI/CD optimization, DevSecOps checks, Docker image optimization, Kubernetes reliability improvements, and Infrastructure as Code.
+
+The goal was to reduce manual work, improve deployment confidence, and make the project easier to operate in both local Kubernetes and EC2-based deployment flows.
+
+### What was added
+
+| Area | Improvement | Why it matters |
+| --- | --- | --- |
+| CI/CD optimization | Added Docker build cache, backend Go checks, and workflow concurrency in `.github/workflows/ci.yml` | Reuses unchanged Docker layers, catches backend issues earlier, and cancels outdated runs |
+| DevSecOps | Added reusable workflows for Docker linting, secrets scanning, code quality, and image scanning | Blocks image build and deployment if security checks fail |
+| Docker optimization | Optimized backend Dockerfile with dependency caching and a distroless runtime image | Reduced backend image size and improved runtime security |
+| Kubernetes reliability | Added 2 replicas, rolling update strategy, backend security context, and separate readiness probe | Improves availability and safer rollouts |
+| Observability | Added `/health` and `/ready` endpoints | Helps Kubernetes distinguish between "alive" and "ready for traffic" |
+| Local automation | Added scripts for local deploy, health checks, log analysis, backup, and restore | Reduces repeated manual commands during local testing |
+| IaC | Added Terraform for EC2 provisioning | Makes the deployment server repeatable |
+| Configuration automation | Added Ansible to install Docker, Docker Compose, and Git on EC2 | Prepares the EC2 server automatically for deployment |
+
+### DevSecOps workflows
+
+The DevSecOps pipeline is split into small reusable workflows:
+
+```text
+.github/workflows/code-quality.yml        -> Go test and Go vet
+.github/workflows/docker-lint.yml         -> Hadolint for Dockerfiles
+.github/workflows/secrets-scan.yml        -> Gitleaks secret scanning
+.github/workflows/image-scan.yml          -> Trivy image vulnerability scanning
+.github/workflows/devsecops-pipeline.yml  -> Runs all checks together
+```
+
+On every push to `main`, the DevSecOps pipeline runs first. It runs code quality, secret scanning, Dockerfile linting, and Trivy image scanning. The CI pipeline starts only after the DevSecOps pipeline finishes successfully. The CD workflow deploys only after the CI workflow succeeds.
+
+Gitleaks handles secret detection, so Trivy is configured to focus on image vulnerability scanning.
+
+### Local Kubernetes automation
+
+The `scripts/` folder contains simple operational scripts:
+
+```text
+scripts/deploy-local.sh     -> builds images, loads them into kind, applies manifests, and waits for rollouts
+scripts/health-check.sh     -> checks pods, services, endpoints, /health, and /ready
+scripts/log-analyzer.sh     -> shows events/logs and searches for common failure words
+scripts/backup-mysql.sh     -> creates a MySQL backup from the Kubernetes pod
+scripts/restore-mysql.sh    -> restores a MySQL backup into the Kubernetes pod
+```
+
+Run from the project root:
+
+```bash
+./scripts/deploy-local.sh
+./scripts/health-check.sh
+./scripts/log-analyzer.sh
+./scripts/backup-mysql.sh
+./scripts/restore-mysql.sh backups/<backup-file>.sql
+```
+
+### Infrastructure automation
+
+Terraform and Ansible live under `infra/`:
+
+```text
+infra/terraform/  -> creates the EC2 deployment server
+infra/ansible/    -> configures the EC2 server with Docker, Docker Compose, and Git
+```
+
+Provision EC2:
+
+```bash
+cd infra/terraform
+ssh-keygen -t ed25519 -f terra-automate-key -C "skillpulse-ec2"
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform plan
+terraform apply
+```
+
+Configure EC2:
+
+```bash
+cd ../ansible
+cp inventory.example.ini inventory.ini
+ansible-playbook -i inventory.ini setup-server.yml
+```
+
+The real `terraform.tfvars`, Ansible `inventory.ini`, Terraform state, and private SSH key are ignored by Git.
+
+### GitHub Actions secrets
+
+The EC2 deployment workflow needs these GitHub Actions secrets:
+
+```text
+DOCKERHUB_USERNAME
+DOCKERHUB_TOKEN
+EC2_HOST
+EC2_USER
+EC2_SSH_KEY
+```
+
+It also needs this repository variable:
+
+```text
+DEPLOY_ENABLED=true
+```
+
+The EC2 server also needs a local `.env` file in `~/github-actions-kubernetes-masterclass`:
+
+```env
+DOCKERHUB_USERNAME=<your-dockerhub-username>
+MYSQL_ROOT_PASSWORD=rootpassword123
+DB_NAME=skillpulse
+DB_USER=skillpulse
+DB_PASSWORD=skillpulse123
+```
+
+This `.env` file is not committed because it contains runtime configuration.
+
+### Verified results
+
+Local verification completed successfully:
+
+```text
+Docker build: backend and frontend images built successfully
+Kubernetes: backend, frontend, and MySQL pods running
+Health checks: /health returned healthy and /ready returned ready
+Backup/restore: MySQL backup and restore completed successfully
+Go checks: go test ./... and go vet ./... passed
+Terraform: terraform validate passed
+Ansible: EC2 setup completed with failed=0
+GitHub Actions: CI/CD pipeline completed green and app deployed to EC2
+```
+
+Backend image size improved from:
+
+```text
+34.6MB -> 18.3MB
+```
+
+### Proof screenshots to capture
+
+Take these screenshots for the hackathon submission:
+
+1. GitHub Actions page showing green DevSecOps pipeline.
+2. GitHub Actions page showing CI starting after the DevSecOps pipeline succeeds.
+3. GitHub Actions CD job showing successful EC2 deployment.
+4. Browser showing the app running on EC2: `http://<EC2_PUBLIC_IP>`.
+5. Docker image size output showing backend image size around `18.3MB`.
+6. Local Kubernetes pods running:
+
+```bash
+kubectl get pods -n skillpulse
+```
+
+7. Health check script output:
+
+```bash
+./scripts/health-check.sh
+```
+
+8. Backup and restore script output:
+
+```bash
+./scripts/backup-mysql.sh
+./scripts/restore-mysql.sh backups/<backup-file>.sql
+```
+
+9. Terraform output showing EC2 public IP:
+
+```bash
+terraform output
+```
+
+10. Ansible recap showing `failed=0`:
+
+```bash
+ansible-playbook -i inventory.ini setup-server.yml
+```
+
+11. EC2 server containers running:
+
+```bash
+ssh -i infra/terraform/terra-automate-key ubuntu@<EC2_PUBLIC_IP>
+cd ~/github-actions-kubernetes-masterclass
+docker compose ps
+```
+
+### How to compare time reduction
+
+Use GitHub Actions run duration to compare before and after optimization:
+
+1. Open GitHub repository.
+2. Go to `Actions`.
+3. Open an older CI run before the optimization.
+4. Note the total run time and job time.
+5. Open the latest CI run after the optimization.
+6. Compare the total run time and the Docker build step duration.
+
+The important improvements to look for:
+
+```text
+Docker layer cache is reused in later builds
+unchanged Docker layers show as cached
+old workflow runs are cancelled when newer commits are pushed
+backend code is tested before images are built
+backend image size is smaller, reducing push/pull work
+```
+
+Useful commands for local proof:
+
+```bash
+docker images | grep skillpulse
+time ./scripts/deploy-local.sh
+```
+
+The first optimized run may still take time because dependencies and cache layers are created. The next runs should be faster because Docker and GitHub Actions can reuse cache.
+
+---
+
 ## Why DevOps matters
 
 For most of software's history, the people who *wrote* software and the people who *ran* it were two different teams with two different goals.

@@ -3,6 +3,10 @@ name: DevSecOps End to End Pipeline
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'k8s/**'
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
     branches: [main]
   workflow_dispatch:

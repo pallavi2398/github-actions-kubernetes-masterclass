@@ -1,30 +1,23 @@
 name: CI
 
 on:
-  push:
+  workflow_run:
+    workflows: ["DevSecOps End to End Pipeline"]
+    types: [completed]
     branches: [main]
-    paths-ignore:
-      - 'k8s/**'
-      - 'docs/**'
-      - '**/*.md'
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
   build-and-push:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
         with:
-          go-version-file: ./backend/go.mod
-
-      - name: Run backend tests
-        working-directory: ./backend
-        run: go test ./...
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: docker/setup-buildx-action@v4
 
@@ -43,7 +36,7 @@ jobs:
           cache-to: type=gha,mode=max
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-backend:latest' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-backend:{0}', github.sha) }}
+            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-backend:{1}', secrets.DOCKERHUB_USERNAME, github.event.workflow_run.head_sha) || format('skillpulse-backend:{0}', github.event.workflow_run.head_sha) }}
 
       - name: Build and push frontend
         uses: docker/build-push-action@v7
@@ -54,4 +47,4 @@ jobs:
           cache-to: type=gha,mode=max
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:latest', secrets.DOCKERHUB_USERNAME) || 'skillpulse-frontend:latest' }}
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:{1}', secrets.DOCKERHUB_USERNAME, github.sha) || format('skillpulse-frontend:{0}', github.sha) }}
+            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/skillpulse-frontend:{1}', secrets.DOCKERHUB_USERNAME, github.event.workflow_run.head_sha) || format('skillpulse-frontend:{0}', github.event.workflow_run.head_sha) }}
